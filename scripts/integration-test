@@ -18,7 +18,7 @@ while ! curl -sf http://localhost:80/healthz >/dev/null 2>&1; do
 done
 
 # Tail the rancher logs if rancher fails to deploy the webhook after 5 minutes.
-bash -c "sleep 300 && echo 'Rancher has not deployed webhook after 5m tailing logs' && tail -f ./rancher.log" &
+bash -c "sleep 1200 && echo 'Rancher has not deployed webhook after 5m tailing logs' && tail -f ./rancher.log" &
 # Get PID of the tail command so we can kill it if needed
 TAIL_PID=$!
 
@@ -28,6 +28,7 @@ while ! kubectl rollout status -w -n cattle-system deploy/rancher-webhook >/dev/
     sleep 2
 done
 
+sleep 300
 # After rancher deploys webhook kill the bash command running tail.
 kill ${TAIL_PID}
 
