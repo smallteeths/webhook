@@ -7,7 +7,7 @@ import (
 
 	"github.com/golang/mock/gomock"
 	"github.com/rancher/webhook/pkg/admission"
-	"github.com/rancher/webhook/pkg/fakes"
+	"github.com/rancher/wrangler/pkg/generic/fake"
 	"github.com/stretchr/testify/require"
 	admissionv1 "k8s.io/api/admission/v1"
 	authenicationv1 "k8s.io/api/authentication/v1"
@@ -17,6 +17,11 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+)
+
+var (
+	secretGVR = metav1.GroupVersionResource{Group: "", Version: "v1", Resource: "secrets"}
+	secretGVK = metav1.GroupVersionKind{Group: "", Version: "v1", Kind: "Secret"}
 )
 
 func Test_roleBindingIndexer(t *testing.T) {
@@ -116,9 +121,7 @@ func Test_roleBindingIndexer(t *testing.T) {
 	}
 }
 
-func TestMutatorAdmit(t *testing.T) {
-	secretGVR := metav1.GroupVersionResource{Group: "", Version: "v1", Resource: "secrets"}
-	secretGVK := metav1.GroupVersionKind{Group: "", Version: "v1", Kind: "Secret"}
+func TestMutatorAdmitOnDelete(t *testing.T) {
 	const secretName = "test-secret"
 	const secretNamespace = "test-ns"
 
@@ -329,15 +332,15 @@ func TestMutatorAdmit(t *testing.T) {
 
 			ctrl := gomock.NewController(t)
 
-			roleBindingController := fakes.NewMockRoleBindingController(ctrl)
-			roleBindingCache := fakes.NewMockRoleBindingCache(ctrl)
+			roleBindingController := fake.NewMockControllerInterface[*rbacv1.RoleBinding, *rbacv1.RoleBindingList](ctrl)
+			roleBindingCache := fake.NewMockCacheInterface[*rbacv1.RoleBinding](ctrl)
 			roleBindingController.EXPECT().Cache().Return(roleBindingCache).AnyTimes()
 
 			roleBindingCache.EXPECT().AddIndexer(gomock.Any(), gomock.Any())
 			roleBindingCache.EXPECT().GetByIndex(gomock.Any(), fmt.Sprintf("%s/%s", secretNamespace, secretName)).Return(test.ownedRoleBindings, test.bindingIndexerError).AnyTimes()
 
-			roleController := fakes.NewMockRoleController(ctrl)
-			roleCache := fakes.NewMockRoleCache(ctrl)
+			roleController := fake.NewMockControllerInterface[*rbacv1.Role, *rbacv1.RoleList](ctrl)
+			roleCache := fake.NewMockCacheInterface[*rbacv1.Role](ctrl)
 			roleController.EXPECT().Cache().Return(roleCache).AnyTimes()
 			for _, role := range []rbacv1.Role{testValidRole, testValidRoleNorman, testInValidRole} {
 				role := role
@@ -352,6 +355,71 @@ func TestMutatorAdmit(t *testing.T) {
 			}
 
 			mutator := NewMutator(roleController, roleBindingController)
+			resp, err := mutator.Admit(&req)
+			if test.wantErr {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+				require.Equal(t, test.wantAdmit, resp.Allowed)
+			}
+		})
+	}
+}
+
+func TestMutatorAdmitOnCreate(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		secret    corev1.Secret
+		wantAdmit bool
+		wantErr   bool
+	}{
+		{
+			name:      "create secret",
+			secret:    corev1.Secret{},
+			wantAdmit: true,
+		},
+		{
+			name: "create cloud credential secret",
+			secret: corev1.Secret{
+				Type: "provisioning.cattle.io/cloud-credential",
+			},
+			wantAdmit: true,
+		},
+	}
+
+	ctrl := gomock.NewController(t)
+	roleBindingController := fake.NewMockControllerInterface[*rbacv1.RoleBinding, *rbacv1.RoleBindingList](ctrl)
+	roleController := fake.NewMockControllerInterface[*rbacv1.Role, *rbacv1.RoleList](ctrl)
+	roleBindingCache := fake.NewMockCacheInterface[*rbacv1.RoleBinding](ctrl)
+	roleBindingController.EXPECT().Cache().Return(roleBindingCache).AnyTimes()
+	roleBindingCache.EXPECT().AddIndexer(gomock.Any(), gomock.Any())
+
+	mutator := NewMutator(roleController, roleBindingController)
+
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			req := admission.Request{
+				AdmissionRequest: admissionv1.AdmissionRequest{
+					UID:             "2",
+					Kind:            secretGVK,
+					Resource:        secretGVR,
+					RequestKind:     &secretGVK,
+					RequestResource: &secretGVR,
+					Name:            "my-secret",
+					Namespace:       "test-ns",
+					Operation:       admissionv1.Create,
+					UserInfo:        authenicationv1.UserInfo{Username: "test-user", UID: ""},
+					Object:          runtime.RawExtension{},
+					OldObject:       runtime.RawExtension{},
+				},
+			}
+			var err error
+			req.Object.Raw, err = json.Marshal(test.secret)
+			require.NoError(t, err)
+
 			resp, err := mutator.Admit(&req)
 			if test.wantErr {
 				require.Error(t, err)

@@ -9,11 +9,12 @@ import (
 
 	"github.com/golang/mock/gomock"
 	apisv3 "github.com/rancher/rancher/pkg/apis/management.cattle.io/v3"
+	v3 "github.com/rancher/rancher/pkg/apis/management.cattle.io/v3"
 	"github.com/rancher/webhook/pkg/admission"
 	"github.com/rancher/webhook/pkg/auth"
-	"github.com/rancher/webhook/pkg/fakes"
 	"github.com/rancher/webhook/pkg/resolvers"
 	"github.com/rancher/webhook/pkg/resources/management.cattle.io/v3/projectroletemplatebinding"
+	"github.com/rancher/wrangler/pkg/generic/fake"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 	v1 "k8s.io/api/admission/v1"
@@ -33,12 +34,13 @@ const (
 
 type ProjectRoleTemplateBindingSuite struct {
 	suite.Suite
-	adminRT         *apisv3.RoleTemplate
-	readNodesRT     *apisv3.RoleTemplate
-	lockedRT        *apisv3.RoleTemplate
-	adminCR         *rbacv1.ClusterRole
-	writeNodeCR     *rbacv1.ClusterRole
-	readServiceRole *rbacv1.Role
+	adminRT          *apisv3.RoleTemplate
+	readNodesRT      *apisv3.RoleTemplate
+	lockedRT         *apisv3.RoleTemplate
+	clusterContextRT *apisv3.RoleTemplate
+	adminCR          *rbacv1.ClusterRole
+	writeNodeCR      *rbacv1.ClusterRole
+	readServiceRole  *rbacv1.Role
 }
 
 func TestProjectRoleTemplateBindings(t *testing.T) {
@@ -94,6 +96,14 @@ func (p *ProjectRoleTemplateBindingSuite) SetupSuite() {
 		Locked:      true,
 		Context:     "project",
 	}
+	p.clusterContextRT = &apisv3.RoleTemplate{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "cluster-member",
+		},
+		DisplayName: "Cluster Member",
+		Rules:       []rbacv1.PolicyRule{ruleReadServices},
+		Context:     "cluster",
+	}
 	p.adminCR = &rbacv1.ClusterRole{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "admin-role",
@@ -110,7 +120,7 @@ func (p *ProjectRoleTemplateBindingSuite) SetupSuite() {
 	}
 }
 
-func (p *ProjectRoleTemplateBindingSuite) Test_PrivilegeEscalation() {
+func (p *ProjectRoleTemplateBindingSuite) TestPrivilegeEscalation() {
 	const adminUser = "admin-userid"
 	const testUser = "test-userid"
 	const errorUser = "error-userid"
@@ -139,11 +149,11 @@ func (p *ProjectRoleTemplateBindingSuite) Test_PrivilegeEscalation() {
 	resolver, _ := validation.NewTestRuleResolver(roles, roleBindings, clusterRoles, clusterRoleBindings)
 
 	ctrl := gomock.NewController(p.T())
-	roleTemplateCache := fakes.NewMockRoleTemplateCache(ctrl)
+	roleTemplateCache := fake.NewMockNonNamespacedCacheInterface[*v3.RoleTemplate](ctrl)
 	roleTemplateCache.EXPECT().Get(p.adminRT.Name).Return(p.adminRT, nil).AnyTimes()
-	clusterRoleCache := fakes.NewMockClusterRoleCache(ctrl)
+	clusterRoleCache := fake.NewMockNonNamespacedCacheInterface[*rbacv1.ClusterRole](ctrl)
 	roleResolver := auth.NewRoleTemplateResolver(roleTemplateCache, clusterRoleCache)
-	prtbCache := fakes.NewMockProjectRoleTemplateBindingCache(ctrl)
+	prtbCache := fake.NewMockCacheInterface[*apisv3.ProjectRoleTemplateBinding](ctrl)
 	prtbCache.EXPECT().AddIndexer(gomock.Any(), gomock.Any())
 	prtbCache.EXPECT().GetByIndex(gomock.Any(), resolvers.GetUserKey(prtbUser, projectID)).Return([]*apisv3.ProjectRoleTemplateBinding{{
 		UserName:         prtbUser,
@@ -151,7 +161,7 @@ func (p *ProjectRoleTemplateBindingSuite) Test_PrivilegeEscalation() {
 	},
 	}, nil).AnyTimes()
 	prtbCache.EXPECT().GetByIndex(gomock.Any(), gomock.Any()).Return(nil, nil).AnyTimes()
-	crtbCache := fakes.NewMockClusterRoleTemplateBindingCache(ctrl)
+	crtbCache := fake.NewMockCacheInterface[*apisv3.ClusterRoleTemplateBinding](ctrl)
 	crtbCache.EXPECT().AddIndexer(gomock.Any(), gomock.Any())
 	crtbCache.EXPECT().GetByIndex(gomock.Any(), resolvers.GetUserKey(crtbUser, clusterID)).Return([]*apisv3.ClusterRoleTemplateBinding{
 		{
@@ -288,7 +298,7 @@ func (p *ProjectRoleTemplateBindingSuite) Test_PrivilegeEscalation() {
 	}
 }
 
-func (p *ProjectRoleTemplateBindingSuite) Test_UpdateValidation() {
+func (p *ProjectRoleTemplateBindingSuite) TestValidationOnUpdate() {
 	const (
 		adminUser    = "admin-userid"
 		newUser      = "newUser-userid"
@@ -307,15 +317,15 @@ func (p *ProjectRoleTemplateBindingSuite) Test_UpdateValidation() {
 	resolver, _ := validation.NewTestRuleResolver(nil, nil, clusterRoles, clusterRoleBindings)
 
 	ctrl := gomock.NewController(p.T())
-	roleTemplateCache := fakes.NewMockRoleTemplateCache(ctrl)
+	roleTemplateCache := fake.NewMockNonNamespacedCacheInterface[*v3.RoleTemplate](ctrl)
 	roleTemplateCache.EXPECT().Get(p.adminRT.Name).Return(p.adminRT, nil).AnyTimes()
 	roleTemplateCache.EXPECT().List(gomock.Any()).Return([]*apisv3.RoleTemplate{p.adminRT}, nil).AnyTimes()
-	clusterRoleCache := fakes.NewMockClusterRoleCache(ctrl)
+	clusterRoleCache := fake.NewMockNonNamespacedCacheInterface[*rbacv1.ClusterRole](ctrl)
 	roleResolver := auth.NewRoleTemplateResolver(roleTemplateCache, clusterRoleCache)
-	prtbCache := fakes.NewMockProjectRoleTemplateBindingCache(ctrl)
+	prtbCache := fake.NewMockCacheInterface[*apisv3.ProjectRoleTemplateBinding](ctrl)
 	prtbCache.EXPECT().AddIndexer(gomock.Any(), gomock.Any())
 	prtbCache.EXPECT().GetByIndex(gomock.Any(), gomock.Any()).Return(nil, nil).AnyTimes()
-	crtbCache := fakes.NewMockClusterRoleTemplateBindingCache(ctrl)
+	crtbCache := fake.NewMockCacheInterface[*apisv3.ClusterRoleTemplateBinding](ctrl)
 	crtbCache.EXPECT().AddIndexer(gomock.Any(), gomock.Any())
 	crtbCache.EXPECT().GetByIndex(gomock.Any(), gomock.Any()).Return(nil, nil).AnyTimes()
 	crtbResolver := resolvers.NewCRTBRuleResolver(crtbCache, roleResolver)
@@ -350,7 +360,7 @@ func (p *ProjectRoleTemplateBindingSuite) Test_UpdateValidation() {
 			allowed: true,
 		},
 		{
-			name: "update RoleTemplate",
+			name: "update role template",
 			args: args{
 				username: adminUser,
 				oldPRTB: func() *apisv3.ProjectRoleTemplateBinding {
@@ -360,6 +370,22 @@ func (p *ProjectRoleTemplateBindingSuite) Test_UpdateValidation() {
 				newPRTB: func() *apisv3.ProjectRoleTemplateBinding {
 					basePRTB := newBasePRTB()
 					basePRTB.RoleTemplateName = p.readNodesRT.Name
+					return basePRTB
+				},
+			},
+			allowed: false,
+		},
+		{
+			name: "update service account",
+			args: args{
+				username: adminUser,
+				oldPRTB: func() *apisv3.ProjectRoleTemplateBinding {
+					basePRTB := newBasePRTB()
+					return basePRTB
+				},
+				newPRTB: func() *apisv3.ProjectRoleTemplateBinding {
+					basePRTB := newBasePRTB()
+					basePRTB.ServiceAccount = "default"
 					return basePRTB
 				},
 			},
@@ -377,6 +403,59 @@ func (p *ProjectRoleTemplateBindingSuite) Test_UpdateValidation() {
 				newPRTB: func() *apisv3.ProjectRoleTemplateBinding {
 					basePRTB := newBasePRTB()
 					basePRTB.UserName = newUser
+					return basePRTB
+				},
+			},
+			allowed: false,
+		},
+		{
+			name: "update removing a previously set service account",
+			args: args{
+				username: adminUser,
+				oldPRTB: func() *apisv3.ProjectRoleTemplateBinding {
+					basePRTB := newBasePRTB()
+					basePRTB.UserName = ""
+					basePRTB.ServiceAccount = "p1:default"
+					return basePRTB
+				},
+				newPRTB: func() *apisv3.ProjectRoleTemplateBinding {
+					basePRTB := newBasePRTB()
+					basePRTB.UserName = ""
+					return basePRTB
+				},
+			},
+			allowed: false,
+		},
+		{
+			name: "update previously set service account",
+			args: args{
+				username: adminUser,
+				oldPRTB: func() *apisv3.ProjectRoleTemplateBinding {
+					basePRTB := newBasePRTB()
+					basePRTB.UserName = ""
+					basePRTB.ServiceAccount = "p1:default"
+					return basePRTB
+				},
+				newPRTB: func() *apisv3.ProjectRoleTemplateBinding {
+					basePRTB := newBasePRTB()
+					basePRTB.UserName = ""
+					basePRTB.ServiceAccount = "p1:another"
+					return basePRTB
+				},
+			},
+			allowed: false,
+		},
+		{
+			name: "set a previously unset service account with a user name already present",
+			args: args{
+				username: adminUser,
+				oldPRTB: func() *apisv3.ProjectRoleTemplateBinding {
+					basePRTB := newBasePRTB()
+					return basePRTB
+				},
+				newPRTB: func() *apisv3.ProjectRoleTemplateBinding {
+					basePRTB := newBasePRTB()
+					basePRTB.ServiceAccount = "p1:another"
 					return basePRTB
 				},
 			},
@@ -402,7 +481,7 @@ func (p *ProjectRoleTemplateBindingSuite) Test_UpdateValidation() {
 			allowed: true,
 		},
 		{
-			name: "update previously unset user and set group ",
+			name: "update previously unset user and set group",
 			args: args{
 				username: adminUser,
 				oldPRTB: func() *apisv3.ProjectRoleTemplateBinding {
@@ -438,25 +517,6 @@ func (p *ProjectRoleTemplateBindingSuite) Test_UpdateValidation() {
 			allowed: false,
 		},
 		{
-			name: "update previously unset user principal",
-			args: args{
-				username: adminUser,
-				oldPRTB: func() *apisv3.ProjectRoleTemplateBinding {
-					basePRTB := newBasePRTB()
-					basePRTB.UserName = newUser
-					basePRTB.UserPrincipalName = ""
-					return basePRTB
-				},
-				newPRTB: func() *apisv3.ProjectRoleTemplateBinding {
-					basePRTB := newBasePRTB()
-					basePRTB.UserName = newUser
-					basePRTB.UserPrincipalName = newUserPrinc
-					return basePRTB
-				},
-			},
-			allowed: true,
-		},
-		{
 			name: "update previously set group",
 			args: args{
 				username: adminUser,
@@ -476,7 +536,7 @@ func (p *ProjectRoleTemplateBindingSuite) Test_UpdateValidation() {
 			allowed: false,
 		},
 		{
-			name: "update previously unset group",
+			name: "update previously unset group with no previously set user",
 			args: args{
 				username: adminUser,
 				oldPRTB: func() *apisv3.ProjectRoleTemplateBinding {
@@ -537,7 +597,7 @@ func (p *ProjectRoleTemplateBindingSuite) Test_UpdateValidation() {
 			allowed: false,
 		},
 		{
-			name: "update previously unset group principal",
+			name: "update previously unset user principal",
 			args: args{
 				username: adminUser,
 				oldPRTB: func() *apisv3.ProjectRoleTemplateBinding {
@@ -558,7 +618,7 @@ func (p *ProjectRoleTemplateBindingSuite) Test_UpdateValidation() {
 			allowed: true,
 		},
 		{
-			name: "update previously set group projectName",
+			name: "update previously set project name",
 			args: args{
 				username: adminUser,
 				oldPRTB: func() *apisv3.ProjectRoleTemplateBinding {
@@ -591,7 +651,7 @@ func (p *ProjectRoleTemplateBindingSuite) Test_UpdateValidation() {
 	}
 }
 
-func (p *ProjectRoleTemplateBindingSuite) Test_Create() {
+func (p *ProjectRoleTemplateBindingSuite) TestValidationOnCreate() {
 	const adminUser = "admin-userid"
 	const badRoleTemplateName = "bad-roletemplate"
 	clusterRoles := []*rbacv1.ClusterRole{p.adminCR}
@@ -606,17 +666,18 @@ func (p *ProjectRoleTemplateBindingSuite) Test_Create() {
 	resolver, _ := validation.NewTestRuleResolver(nil, nil, clusterRoles, clusterRoleBindings)
 
 	ctrl := gomock.NewController(p.T())
-	roleTemplateCache := fakes.NewMockRoleTemplateCache(ctrl)
+	roleTemplateCache := fake.NewMockNonNamespacedCacheInterface[*v3.RoleTemplate](ctrl)
 	roleTemplateCache.EXPECT().Get(p.adminRT.Name).Return(p.adminRT, nil).AnyTimes()
 	roleTemplateCache.EXPECT().Get(p.lockedRT.Name).Return(p.lockedRT, nil).AnyTimes()
+	roleTemplateCache.EXPECT().Get(p.clusterContextRT.Name).Return(p.clusterContextRT, nil).AnyTimes()
 	roleTemplateCache.EXPECT().Get(badRoleTemplateName).Return(nil, errExpected).AnyTimes()
 	roleTemplateCache.EXPECT().Get("").Return(nil, errExpected).AnyTimes()
-	clusterRoleCache := fakes.NewMockClusterRoleCache(ctrl)
+	clusterRoleCache := fake.NewMockNonNamespacedCacheInterface[*rbacv1.ClusterRole](ctrl)
 	roleResolver := auth.NewRoleTemplateResolver(roleTemplateCache, clusterRoleCache)
-	prtbCache := fakes.NewMockProjectRoleTemplateBindingCache(ctrl)
+	prtbCache := fake.NewMockCacheInterface[*apisv3.ProjectRoleTemplateBinding](ctrl)
 	prtbCache.EXPECT().AddIndexer(gomock.Any(), gomock.Any())
 	prtbCache.EXPECT().GetByIndex(gomock.Any(), gomock.Any()).Return(nil, nil).AnyTimes()
-	crtbCache := fakes.NewMockClusterRoleTemplateBindingCache(ctrl)
+	crtbCache := fake.NewMockCacheInterface[*apisv3.ClusterRoleTemplateBinding](ctrl)
 	crtbCache.EXPECT().AddIndexer(gomock.Any(), gomock.Any())
 	crtbCache.EXPECT().GetByIndex(gomock.Any(), gomock.Any()).Return(nil, nil).AnyTimes()
 	crtbResolver := resolvers.NewCRTBRuleResolver(crtbCache, roleResolver)
@@ -648,7 +709,7 @@ func (p *ProjectRoleTemplateBindingSuite) Test_Create() {
 			allowed: true,
 		},
 		{
-			name: "missing roleTemplate",
+			name: "missing role template",
 			args: args{
 				username: adminUser,
 				oldPRTB: func() *apisv3.ProjectRoleTemplateBinding {
@@ -663,7 +724,38 @@ func (p *ProjectRoleTemplateBindingSuite) Test_Create() {
 			allowed: false,
 		},
 		{
-			name: "missing user and group",
+			name: "setting service account",
+			args: args{
+				username: adminUser,
+				oldPRTB: func() *apisv3.ProjectRoleTemplateBinding {
+					return nil
+				},
+				newPRTB: func() *apisv3.ProjectRoleTemplateBinding {
+					basePRTB := newBasePRTB()
+					basePRTB.UserName = ""
+					basePRTB.ServiceAccount = "default"
+					return basePRTB
+				},
+			},
+			allowed: true,
+		},
+		{
+			name: "setting a non project role template context",
+			args: args{
+				username: adminUser,
+				oldPRTB: func() *apisv3.ProjectRoleTemplateBinding {
+					return nil
+				},
+				newPRTB: func() *apisv3.ProjectRoleTemplateBinding {
+					basePRTB := newBasePRTB()
+					basePRTB.RoleTemplateName = "cluster-member"
+					return basePRTB
+				},
+			},
+			allowed: false,
+		},
+		{
+			name: "neither user nor group nor service account subject is set",
 			args: args{
 				username: adminUser,
 				oldPRTB: func() *apisv3.ProjectRoleTemplateBinding {
@@ -694,7 +786,40 @@ func (p *ProjectRoleTemplateBindingSuite) Test_Create() {
 			allowed: false,
 		},
 		{
-			name: "both user and group set",
+			name: "both user and service account set",
+			args: args{
+				username: adminUser,
+				oldPRTB: func() *apisv3.ProjectRoleTemplateBinding {
+					return nil
+				},
+				newPRTB: func() *apisv3.ProjectRoleTemplateBinding {
+					basePRTB := newBasePRTB()
+					basePRTB.UserName = "newUser"
+					basePRTB.ServiceAccount = "sa"
+					return basePRTB
+				},
+			},
+			allowed: false,
+		},
+		{
+			name: "both group and service account set",
+			args: args{
+				username: adminUser,
+				oldPRTB: func() *apisv3.ProjectRoleTemplateBinding {
+					return nil
+				},
+				newPRTB: func() *apisv3.ProjectRoleTemplateBinding {
+					basePRTB := newBasePRTB()
+					basePRTB.UserName = ""
+					basePRTB.GroupName = "newGroup"
+					basePRTB.ServiceAccount = "sa"
+					return basePRTB
+				},
+			},
+			allowed: false,
+		},
+		{
+			name: "bad role template name",
 			args: args{
 				username: adminUser,
 				oldPRTB: func() *apisv3.ProjectRoleTemplateBinding {
@@ -706,10 +831,10 @@ func (p *ProjectRoleTemplateBindingSuite) Test_Create() {
 					return basePRTB
 				},
 			},
-			allowed: false,
+			wantErr: true,
 		},
 		{
-			name: "Locked roleTemplate",
+			name: "locked role template",
 			args: args{
 				username: adminUser,
 				oldPRTB: func() *apisv3.ProjectRoleTemplateBinding {
@@ -724,7 +849,7 @@ func (p *ProjectRoleTemplateBindingSuite) Test_Create() {
 			allowed: false,
 		},
 		{
-			name: "create with unset group projectName",
+			name: "create with unset project name",
 			args: args{
 				username: adminUser,
 				oldPRTB: func() *apisv3.ProjectRoleTemplateBinding {
@@ -743,14 +868,18 @@ func (p *ProjectRoleTemplateBindingSuite) Test_Create() {
 	for i := range tests {
 		test := tests[i]
 		p.Run(test.name, func() {
-			p.T().Parallel()
 			req := createPRTBRequest(p.T(), test.args.oldPRTB(), test.args.newPRTB(), test.args.username)
 			admitters := validator.Admitters()
 			p.Len(admitters, 1)
 			resp, err := admitters[0].Admit(req)
-			p.NoError(err, "Admit failed")
+			if test.wantErr {
+				p.Require().Error(err)
+				p.Require().Nil(resp)
+				return
+			}
+			p.Require().NoError(err, "Admit failed")
 			if resp.Allowed != test.allowed {
-				p.Failf("Response was incorrectly validated", "Wanted response.Allowed = '%v' got %v: result=%+v", test.allowed, resp.Allowed, resp.Result)
+				p.Failf("Response was incorrectly validated", "Wanted response.Allowed = %v got %v: result=%+v", test.allowed, resp.Allowed, resp.Result)
 			}
 		})
 	}
@@ -798,7 +927,6 @@ func newBasePRTB() *apisv3.ProjectRoleTemplateBinding {
 			Name:              "PRTB-new",
 			GenerateName:      "PRTB-",
 			Namespace:         "p-namespace",
-			SelfLink:          "",
 			UID:               "6534e4ef-f07b-4c61-b88d-95a92cce4852",
 			ResourceVersion:   "1",
 			Generation:        1,
