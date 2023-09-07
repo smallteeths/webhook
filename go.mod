@@ -43,7 +43,7 @@ require (
 	github.com/rancher/dynamiclistener v0.3.5
 	github.com/rancher/lasso v0.0.0-20230629200414-8a54b32e6792
 	github.com/rancher/lasso/controller-runtime v0.0.0-20221206162308-10123d5719ad
-	github.com/rancher/rancher/pkg/apis v0.0.0-20230713221208-37ef3050e188
+	github.com/rancher/rancher/pkg/apis v0.0.0-20230901132600-5e1ee2611616
 	github.com/rancher/rke v1.5.0-rc2
 	github.com/rancher/wrangler v1.1.1
 	github.com/sirupsen/logrus v1.9.3
@@ -113,8 +113,8 @@ require (
 	github.com/prometheus/common v0.37.0 // indirect
 	github.com/prometheus/procfs v0.8.0 // indirect
 	github.com/rancher/aks-operator v1.2.0-rc2 // indirect
-	github.com/rancher/eks-operator v1.2.2-rc6 // indirect
-	github.com/rancher/fleet/pkg/apis v0.0.0-20230821130910-23e1c146755a // indirect
+	github.com/rancher/eks-operator v1.2.2-rc3 // indirect
+	github.com/rancher/fleet/pkg/apis v0.0.0-20230810121238-9d0ee7f56848 // indirect
 	github.com/rancher/gke-operator v1.1.6-rc2 // indirect
 	github.com/rancher/norman v0.0.0-20230426211126-d3552b018687 // indirect
 	github.com/shopspring/decimal v1.2.0 // indirect
