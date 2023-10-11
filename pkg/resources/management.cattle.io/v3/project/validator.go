@@ -7,11 +7,13 @@ import (
 
 	v3 "github.com/rancher/rancher/pkg/apis/management.cattle.io/v3"
 	"github.com/rancher/webhook/pkg/admission"
+	controllerv3 "github.com/rancher/webhook/pkg/generated/controllers/management.cattle.io/v3"
 	objectsv3 "github.com/rancher/webhook/pkg/generated/objects/management.cattle.io/v3"
 	"github.com/rancher/wrangler/pkg/data/convert"
 	admissionv1 "k8s.io/api/admission/v1"
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	v1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	"k8s.io/utils/trace"
@@ -20,6 +22,7 @@ import (
 const (
 	systemProjectLabel  = "authz.management.cattle.io/system-project"
 	projectQuotaField   = "resourceQuota"
+	clusterNameField    = "clusterName"
 	namespaceQuotaField = "namespaceDefaultResourceQuota"
 )
 
@@ -31,8 +34,12 @@ type Validator struct {
 }
 
 // NewValidator returns a project validator.
-func NewValidator() *Validator {
-	return &Validator{}
+func NewValidator(clusterCache controllerv3.ClusterCache) *Validator {
+	return &Validator{
+		admitter: admitter{
+			clusterCache: clusterCache,
+		},
+	}
 }
 
 // GVR returns the GroupVersionKind for this CRD.
@@ -60,7 +67,9 @@ func (v *Validator) Admitters() []admission.Admitter {
 	return []admission.Admitter{&v.admitter}
 }
 
-type admitter struct{}
+type admitter struct {
+	clusterCache controllerv3.ClusterCache
+}
 
 // Admit handles the webhook admission request sent to this webhook.
 func (a *admitter) Admit(request *admission.Request) (*admissionv1.AdmissionResponse, error) {
@@ -72,10 +81,16 @@ func (a *admitter) Admit(request *admission.Request) (*admissionv1.AdmissionResp
 		return nil, fmt.Errorf("failed to get old and new projects from request: %w", err)
 	}
 
-	if request.Operation == admissionv1.Delete {
+	switch request.Operation {
+	case admissionv1.Create:
+		return a.admitCreate(newProject)
+	case admissionv1.Update:
+		return a.admitUpdate(oldProject, newProject)
+	case admissionv1.Delete:
 		return a.admitDelete(oldProject)
+	default:
+		return nil, admission.ErrUnsupportedOperation
 	}
-	return a.admitCreateOrUpdate(oldProject, newProject)
 }
 
 func (a *admitter) admitDelete(project *v3.Project) (*admissionv1.AdmissionResponse, error) {
@@ -85,7 +100,27 @@ func (a *admitter) admitDelete(project *v3.Project) (*admissionv1.AdmissionRespo
 	return admission.ResponseAllowed(), nil
 }
 
-func (a *admitter) admitCreateOrUpdate(oldProject, newProject *v3.Project) (*admissionv1.AdmissionResponse, error) {
+func (a *admitter) admitCreate(project *v3.Project) (*admissionv1.AdmissionResponse, error) {
+	fieldErr, err := a.checkClusterExists(project)
+	if err != nil {
+		return nil, fmt.Errorf("error checking cluster name: %w", err)
+	}
+	if fieldErr != nil {
+		return admission.ResponseBadRequest(fieldErr.Error()), nil
+	}
+	return a.admitCommonCreateUpdate(nil, project)
+}
+
+func (a *admitter) admitUpdate(oldProject, newProject *v3.Project) (*admissionv1.AdmissionResponse, error) {
+	if oldProject.Spec.ClusterName != newProject.Spec.ClusterName {
+		fieldErr := field.Invalid(projectSpecFieldPath.Child(clusterNameField), newProject.Spec.ClusterName, "field is immutable")
+		return admission.ResponseBadRequest(fieldErr.Error()), nil
+	}
+	return a.admitCommonCreateUpdate(oldProject, newProject)
+
+}
+
+func (a *admitter) admitCommonCreateUpdate(oldProject, newProject *v3.Project) (*admissionv1.AdmissionResponse, error) {
 	projectQuota := newProject.Spec.ResourceQuota
 	nsQuota := newProject.Spec.NamespaceDefaultResourceQuota
 	if projectQuota == nil && nsQuota == nil {
@@ -93,7 +128,7 @@ func (a *admitter) admitCreateOrUpdate(oldProject, newProject *v3.Project) (*adm
 	}
 	fieldErr, err := checkQuotaFields(projectQuota, nsQuota)
 	if err != nil {
-		return nil, fmt.Errorf("error checking project fields: %w", err)
+		return nil, fmt.Errorf("error checking project quota fields: %w", err)
 	}
 	if fieldErr != nil {
 		return admission.ResponseBadRequest(fieldErr.Error()), nil
@@ -108,8 +143,28 @@ func (a *admitter) admitCreateOrUpdate(oldProject, newProject *v3.Project) (*adm
 	return admission.ResponseAllowed(), nil
 }
 
-func checkQuotaFields(projectQuota *v3.ProjectResourceQuota, nsQuota *v3.NamespaceResourceQuota) (*field.Error, error) {
+func (a *admitter) checkClusterExists(project *v3.Project) (*field.Error, error) {
+	if project.Spec.ClusterName == "" {
+		return field.Required(projectSpecFieldPath.Child(clusterNameField), "clusterName is required"), nil
+	}
+	if project.Spec.ClusterName != project.Namespace {
+		return field.Invalid(projectSpecFieldPath.Child(clusterNameField), project.Spec.ClusterName, "clusterName and project namespace must match"), nil
+	}
+	cluster, err := a.clusterCache.Get(project.Spec.ClusterName)
+	clusterNotFoundErr := field.Invalid(projectSpecFieldPath.Child(clusterNameField), project.Spec.ClusterName, "cluster not found")
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return clusterNotFoundErr, nil
+		}
+		return nil, fmt.Errorf("unable to verify cluster %s exists: %w", project.Spec.ClusterName, err)
+	}
+	if cluster == nil {
+		return clusterNotFoundErr, nil
+	}
+	return nil, nil
+}
 
+func checkQuotaFields(projectQuota *v3.ProjectResourceQuota, nsQuota *v3.NamespaceResourceQuota) (*field.Error, error) {
 	if projectQuota == nil && nsQuota != nil {
 		return field.Required(projectSpecFieldPath.Child(projectQuotaField), fmt.Sprintf("required when %s is set", namespaceQuotaField)), nil
 	}

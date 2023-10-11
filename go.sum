@@ -118,8 +118,8 @@ github.com/cnrancher/ack-operator v0.0.5-0.20230310081604-5534e781bb33 h1:DoZ+tP
 github.com/cnrancher/ack-operator v0.0.5-0.20230310081604-5534e781bb33/go.mod h1:9elvKZomnkWjpUNF/6Hh614tykvic8K+9NcWnY5Duk8=
 github.com/cnrancher/aks-operator v1.1.0-ent-rc6 h1:n7V8BhkeQq+GyPmlk13VrFtnCN8xSJeChXlTGshOx6U=
 github.com/cnrancher/aks-operator v1.1.0-ent-rc6/go.mod h1:ecaLVloTpDbwYBGGe91rev9J+CrP0OU+HYntPfY/m+I=
-github.com/cnrancher/pandaria/pkg/apis v0.0.0-20230907023944-7f873d08277d h1:UE9dbavrvbmrrh0Bf4Qrzkv1o8o3hS+oDreVgQ3A034=
-github.com/cnrancher/pandaria/pkg/apis v0.0.0-20230907023944-7f873d08277d/go.mod h1:n/trhrOku2mgP0O779AqedeGaMKfvzZ5dDPGN4/uweU=
+github.com/cnrancher/pandaria/pkg/apis v0.0.0-20230911072901-7fefcab3c1b9 h1:/MIWgtgrYEptnL1OE+JzumRJyce55LaG6jNQ4zRHh+w=
+github.com/cnrancher/pandaria/pkg/apis v0.0.0-20230911072901-7fefcab3c1b9/go.mod h1:n/trhrOku2mgP0O779AqedeGaMKfvzZ5dDPGN4/uweU=
 github.com/cnrancher/tke-operator v0.0.0-20230324031424-c87fae4e1716 h1:zo4fL7LOw2AQ2H08Q4zQX0PCkXLAWNkiHmApL1wg5os=
 github.com/cnrancher/tke-operator v0.0.0-20230324031424-c87fae4e1716/go.mod h1:OTgIIr4m4/sbxSvR+VilwwOURiMJlaPaHHDl8NIaKZM=
 github.com/cockroachdb/datadriven v0.0.0-20200714090401-bf6692d28da5/go.mod h1:h6jFvWxBdQXxjopDMZyH2UVceIRfR84bdzbkoKrsWNo=

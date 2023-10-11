@@ -60,6 +60,7 @@ Users cannot create ClusterRoleTemplateBindings which violate the following cons
 - `ClusterName` must:
   - Be provided as a non-empty value
   - Match the namespace of the ClusterRoleTemplateBinding
+  - Refer to an existing cluster
 - The roleTemplate indicated in `RoleTemplateName` must be:
   - Provided as a non-empty value
   - Valid (i.e. is an existing `roleTemplate` object of given name in the `management.cattle.io/v3` API group)
@@ -90,6 +91,21 @@ In addition, as in the create validation, both a user subject and a group subjec
 
 The desired value must not change on new spec unless it's equal to the `lockedValue` or `lockedValue` is nil.
 
+## FleetWorkspace 
+
+### Validation Checks
+
+A `FleetWorkspace` cannot be created if a namespace with the same name already exists.
+
+### Mutation Checks
+
+#### On create
+
+When a `FleetWorkspace` is created, it will create the following resources:
+1. `Namespace`. It will have the same name as the `FleetWorkspace`.
+2. `ClusterRole`. It will create the cluster role that has * permission only to the current workspace.
+3. Two `RoleBindings` to bind the current user to fleet-admin roles and `FleetWorkspace` roles.
+
 ## GlobalRole 
 
 ### Validation Checks
@@ -105,6 +121,8 @@ On create or update, the following checks take place:
 #### Escalation Prevention
 
 Users can only change GlobalRoles with rights less than or equal to those they currently possess. This is to prevent privilege escalation. This includes the rules in the RoleTemplates referred to in `inheritedClusterRoles`. 
+
+This escalation check is bypassed if a user has the `escalate` verb on the GlobalRole that they are attempting to update. This can also be given through a wildcard permission (i.e. the `*` verb also gives `escalate`).
 
 #### Builtin Validation
 
@@ -125,6 +143,8 @@ Users can only create/update GlobalRoleBindings with rights less than or equal t
 #### Valid Global Role Reference
 
 GlobalRoleBindings must refer to a valid global role (i.e. an existing `GlobalRole` object in the `management.cattle.io/v3` apiGroup).
+
+This escalation check is bypassed if a user has the `bind` verb on the GlobalRole that they are trying to bind to (through creating or updating a GlobalRoleBinding to that GlobalRole). This can also be given through a wildcard permission (i.e. the `*` verb also gives `bind`).
 
 #### Invalid Fields - Update
 Users cannot update the following fields after creation:
@@ -157,6 +177,10 @@ This admission webhook prevents the disabling or deletion of a NodeDriver if the
 
 ### Validation Checks
 
+#### ClusterName validation
+
+ClusterName must be equal to the namespace, and must refer to an existing management.cattle.io/v3.Cluster object. In addition, users cannot update the field after creation. 
+
 #### Protects system project
 
 The system project cannot be deleted.
@@ -186,8 +210,9 @@ Users cannot create ProjectRoleTemplateBindings that violate the following const
 
 - The `ProjectName` field must be:
     - Provided as a non-empty value
-    - Specified using the format of `cluster-id:project-id`
-    - `project-id`, in particular, must match the namespace of the ProjectRoleTemplateBinding
+    - Specified using the format of `clusterName:projectName`; `clusterName` is the `metadata.name` of a cluster, and `projectName` is the `metadata.name` of a project
+    - The `projectName` part of the field must match the namespace of the ProjectRoleTemplateBinding
+    - Refer to a valid project and cluster (both must exist and project.Spec.ClusterName must equal the cluster)
 - Either a user subject (through `UserName` or `UserPrincipalName`), or a group subject (through `GroupName`
   or `GroupPrincipalName`), or a service account subject (through `ServiceAccount`) must be specified. Exactly one
   subject type of the three must be provided.
