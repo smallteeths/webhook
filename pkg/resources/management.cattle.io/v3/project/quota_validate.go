@@ -1,10 +1,11 @@
 package project
 
 import (
-	"github.com/sirupsen/logrus"
+	"fmt"
 
 	mgmtv3 "github.com/rancher/rancher/pkg/apis/management.cattle.io/v3"
 	"github.com/rancher/wrangler/pkg/data/convert"
+	"github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	quotav1 "k8s.io/apiserver/pkg/quota/v1"
@@ -64,7 +65,7 @@ func convertLimitToResourceList(limit *mgmtv3.ResourceQuotaLimit) (corev1.Resour
 					if key == StorageClassStorageQuotaKey {
 						resourceNameStr := fmt.Sprintf("%s.%s", k, StorageClassStorageQuotaSuffix)
 						rn = corev1.ResourceName(resourceNameStr)
-					} else if key == validate.StorageClassPVCQuotaKey {
+					} else if key == StorageClassPVCQuotaKey {
 						resourceNameStr := fmt.Sprintf("%s.%s", k, StorageClassPVCQuotaSuffix)
 						rn = corev1.ResourceName(resourceNameStr)
 					} else {
